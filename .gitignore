@@ -5,3 +5,4 @@ __pycache__/
 local-history.json
 local-docs/
 local-memory/
+.value-tracking-state/

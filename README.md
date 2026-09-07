@@ -5,9 +5,13 @@ Skill qui produit un bilan de valeur / réalisation des bénéfices d'un projet,
 case, reporting, données d'usage) : tableau KPI (prévu/réalisé/écart),
 leviers 80/20, causes racines sourcées et recommandations priorisées.
 
-Aucune dépendance cloud imposée : tourne en local avec la clé LLM de votre
-choix (Anthropic ou OpenAI), aucun compte ni service tiers requis pour le
-reste (parsing, calculs, anonymisation, historique).
+**Aucune clé LLM requise.** Ce skill est destiné à être exécuté PAR un agent
+LLM (Claude, ChatGPT, ou tout autre agent capable de lancer une commande ou
+d'importer un module Python) qui a déjà sa propre capacité de raisonnement.
+Les scripts ne font que le travail déterministe — calculs, extraction,
+anonymisation ; c'est l'agent qui les exécute qui rédige lui-même la
+synthèse, les causes racines et les recommandations, avec son propre
+raisonnement. Aucun appel réseau vers un provider LLM n'est fait par ce dépôt.
 
 ## Installation
 
@@ -16,33 +20,47 @@ pip install -r requirements.txt
 python -m spacy download fr_core_news_md   # requis par Presidio (anonymisation FR)
 ```
 
-Définir une clé LLM comme variable d'environnement (pas de fichier de config requis) :
+Aucune autre configuration n'est nécessaire.
+
+## Usage — en deux étapes
+
+**1. Calculs déterministes.** L'agent qui exécute le skill lance :
 
 ```bash
-export LLM_PROVIDER=anthropic        # anthropic | openai
-export ANTHROPIC_API_KEY=sk-ant-...
-# ou
-export LLM_PROVIDER=openai
-export OPENAI_API_KEY=sk-...
-```
-
-## Usage
-
-```bash
-python -m scripts.cli \
+python -m scripts.cli analyze \
   --r1 /chemin/vers/dashboard.xlsx \
   --project mon-projet \
   --question "Fais le bilan de valeur du projet"
 ```
 
-Ou en important les modules directement :
+Si des éléments obligatoires manquent (KPI ou coûts), la réponse a
+`statut: "intake"` et peut être retournée telle quelle. Sinon, elle a
+`statut: "besoin_narratif"` et contient `instructions`, `context` et un
+`state_file`.
+
+**2. Narration — rédigée par l'agent, pas par un script.** L'agent lit
+`instructions` + `context` (calculs KPI, extraits documentaires anonymisés,
+historique) et rédige lui-même le JSON `{"synthese", "root_causes",
+"recommandations"}` demandé, qu'il enregistre dans un fichier.
+
+**3. Enregistrement.** L'agent fusionne sa narration avec les données
+déterministes :
+
+```bash
+python -m scripts.cli record --state <state_file> --narrative-file narrative.json
+```
+
+→ affiche le livrable final (`answer`, `deliverable`, `sources`) et l'écrit
+dans l'historique local du projet.
+
+### Alternative : import direct des modules Python
 
 ```python
 from scripts.agent import ValueTrackingAgent
 from scripts.models import AnalyzeRequest, ValueTrackingInputs, ValueKPI, Cout
 
 agent = ValueTrackingAgent()
-response = agent.run(AnalyzeRequest(
+prepared = agent.prepare(AnalyzeRequest(
     question="Bilan de valeur",
     project="mon-projet",
     inputs=ValueTrackingInputs(
@@ -50,32 +68,35 @@ response = agent.run(AnalyzeRequest(
         couts=[Cout(type="CAPEX", libelle="Infra", montant=150_000)],
     ),
 ))
+# prepared["statut"] == "besoin_narratif" -> rédiger la narration soi-même, puis :
+response = agent.record(prepared["state_file"], {
+    "synthese": "...", "root_causes": [...], "recommandations": [...],
+})
 ```
 
 ## Scripts disponibles
 
 ```
 scripts/
-  config.py         Configuration par variables d'environnement
+  config.py         Configuration par variables d'environnement (pas de clé LLM)
   models.py         Modèles Pydantic (contrats d'entrée/sortie)
   compute.py        Calculs déterministes (variance KPI, leviers 80/20) — zéro LLM
-  intake.py         Manifeste des éléments requis (déterministe, pas de LLM)
-  llm.py            Abstraction LLM : anthropic | openai | azure (au choix)
+  intake.py         Manifeste des éléments requis (déterministe)
   anonymizer_presidio.py   Wrapper Presidio (NLP français)
   anonymize.py      Point de passage unique anonymize(text) — jamais sur les chiffres
   pdf_extract.py    Extraction de texte PDF page par page (PyMuPDF)
   local_docs.py     Collecte filtrée déterministe d'extraits projet (.pdf/.xlsx/.csv/.md/.txt)
   project_memory.py Mémoire projet lisible (.md), relue aux analyses suivantes
   history_store.py  Historique des analyses (fichier JSON local, idempotent par coupe)
-  agent.py          ValueTrackingAgent : enchaîne les étapes ci-dessus
+  agent.py          ValueTrackingAgent : prepare() (déterministe) + record() (fusion narration)
   r1/               Parseur du format R1 Dashboard (résolution de mapping + extraction)
-  cli.py            Point d'entrée en ligne de commande
+  cli.py            Point d'entrée en ligne de commande (analyze / record)
 tests/              Suite de tests (pytest)
 ```
 
 Pas de serveur ni d'interface : ce skill s'utilise en exécutant du code (CLI
-ou import Python) — c'est l'agent qui l'invoque qui décide de la présentation
-du résultat, pas ce dépôt.
+ou import Python) — c'est l'agent qui l'invoque qui rédige la narration et
+décide de la présentation du résultat, pas ce dépôt.
 
 ## Déroulé de l'analyse
 
@@ -86,9 +107,11 @@ du résultat, pas ce dépôt.
 3. compute.py : variance KPI + leviers 80/20 (déterministe, zéro LLM)
 4. Collecte d'extraits documentaires du projet (filtre déterministe) + anonymisation Presidio
 5. Lecture de la mémoire projet (.md, notes + analyses passées)
-6. 1 appel LLM : synthèse + causes racines + recommandations (JSON strict)
-7. Écriture de l'analyse dans l'historique local + récap .md dans la mémoire projet
-8. Retour du livrable structuré (jamais de chiffre venant du LLM)
+6. Retour d'un briefing (instructions + contexte) — statut="besoin_narratif"
+   → l'agent appelant rédige lui-même synthèse + causes racines + recommandations
+7. record() : fusion de la narration avec l'état déterministe, écriture dans
+   l'historique local + récap .md dans la mémoire projet
+8. Retour du livrable structuré (jamais de chiffre inventé ou recalculé)
 ```
 
 ## Format attendu du fichier R1
@@ -105,14 +128,15 @@ lus** — garde-fou PII sur la source elle-même.
 ## Confidentialité
 
 - Le texte qualitatif (extraits de documents, mémoire projet) passe par
-  Presidio avant tout envoi au LLM (PERSON, EMAIL_ADDRESS, PHONE_NUMBER, IBAN
-  masqués par défaut — configurable via `PII_ENTITIES`).
+  Presidio avant d'être inclus dans le `context` lu par l'agent appelant
+  (PERSON, EMAIL_ADDRESS, PHONE_NUMBER, IBAN masqués par défaut —
+  configurable via `PII_ENTITIES`).
 - Les chiffres (R1, `inputs`) ne passent **jamais** par l'anonymiseur : un
   montant pourrait être pris pour un numéro de téléphone et corrompu.
-- Avec une clé LLM personnelle (Anthropic ou OpenAI), le texte anonymisé part
-  vers l'API publique du provider choisi. Presidio retire le PII nominatif
-  mais **pas** la confidentialité commerciale (montants, clauses). Ne pas
-  utiliser de documents réels sensibles sans validation préalable.
+- Presidio retire le PII nominatif mais **pas** la confidentialité
+  commerciale (montants, clauses). Ne pas utiliser de documents réels
+  sensibles sans validation préalable, et vérifier la politique de
+  confidentialité de l'agent LLM utilisé pour la narration.
 
 ## Tests
 

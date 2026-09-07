@@ -6,26 +6,28 @@ license: Apache-2.0
 
 # Value Tracking — bilan de réalisation des bénéfices
 
-Agent autonome (sans dépendance cloud obligatoire) qui transforme un fichier R1
-Dashboard (.xlsx) + des documents projet en un livrable de suivi de valeur :
-tableau KPI (prévu/réalisé/écart), leviers 80/20, causes racines sourcées et
-jusqu'à 3 recommandations priorisées.
+Skill qui transforme un fichier R1 Dashboard (.xlsx) + des documents projet en
+un livrable de suivi de valeur : tableau KPI (prévu/réalisé/écart), leviers
+80/20, causes racines sourcées et recommandations priorisées.
 
 Ce dossier est un **skill classique** au sens des dépôts GitHub d'agent
 skills : un manifeste `SKILL.md` + ses propres scripts, sans dépendance à un
-dépôt parent, sans interface dédiée. Il peut être :
-- copié dans `.claude/skills/` (ou équivalent) d'un autre projet Claude Code,
-- déposé tel quel dans son propre dépôt GitHub,
-- piloté par **n'importe quel agent LLM capable d'exécuter du code**
-  (Claude Code, ou tout agent équivalent qui sait lancer une commande shell ou
-  importer un module Python) — pas de serveur ni d'UI à faire tourner.
+dépôt parent, sans interface dédiée, sans clé LLM à configurer.
+
+**Aucun appel LLM interne.** Un skill est invoqué PAR un agent LLM (toi qui
+lis ce fichier) qui a déjà sa propre capacité de raisonnement — il serait
+absurde qu'il appelle un second LLM avec sa propre clé API pour rédiger le
+texte. Les scripts font uniquement le travail déterministe (calculs,
+extraction, anonymisation) ; c'est **toi, l'agent qui exécutes ce skill**, qui
+rédiges la synthèse/les causes/les recommandations, avec ton propre
+raisonnement, à partir des données préparées par les scripts.
 
 ## Règle d'or
 
 Tout chiffre du livrable (`kpi_table`, `ecarts`) vient de code déterministe
-(`scripts/compute.py`), **jamais du LLM**. Le LLM ne fait que la narration
-(synthèse, causes racines, recommandations) à partir de ces chiffres et
-d'extraits documentaires anonymisés.
+(`scripts/compute.py`), **jamais reformulé, recalculé ou inventé par toi**.
+Ton rôle se limite à la narration (synthèse, causes racines, recommandations)
+à partir de ces chiffres et des extraits documentaires anonymisés fournis.
 
 ## Quand déclencher ce skill
 
@@ -34,32 +36,51 @@ d'extraits documentaires anonymisés.
 - « Ce projet délivre-t-il la valeur promise dans le business case ? »
 - Un fichier R1 Dashboard (.xlsx) est fourni et il faut en extraire des KPI
 
-## Deux façons de piloter ce skill
-
-### 1. CLI (agent capable d'exécuter du code — Claude Code, etc.)
+## Comment l'utiliser : deux appels, un entre-deux rédigé par toi
 
 ```bash
 pip install -r requirements.txt
-export ANTHROPIC_API_KEY=sk-ant-...   # ou OPENAI_API_KEY (+ LLM_PROVIDER=openai)
+```
 
-python -m scripts.cli \
+**Étape 1 — calculs déterministes.** Lance l'analyse (via un fichier R1 ou
+des KPI/coûts au format JSON) :
+
+```bash
+python -m scripts.cli analyze \
   --r1 /chemin/vers/dashboard.xlsx \
   --project mon-projet \
   --question "Fais le bilan de valeur du projet"
 ```
 
-Affiche le livrable JSON sur stdout (`answer`, `deliverable`, `sources`,
-`statut`). Si des éléments obligatoires manquent, le CLI renvoie une requête
-d'intake au lieu d'inventer des chiffres.
+Deux résultats possibles :
+- `statut: "intake"` → des éléments obligatoires manquent (KPI ou coûts).
+  Réponds directement avec le contenu retourné, n'invente aucun chiffre.
+- `statut: "besoin_narratif"` → la commande retourne `instructions` (ce
+  qu'il faut rédiger), `context` (les données à exploiter : calculs KPI,
+  extraits documentaires anonymisés, historique) et `state_file`.
 
-### 2. Import direct des modules (agent avec exécution de code Python)
+**Étape 2 — c'est TOI qui rédiges.** Lis `instructions` + `context`, et
+rédige toi-même le JSON `{"synthese", "root_causes", "recommandations"}`
+demandé — c'est ton travail de raisonnement, pas celui d'un script.
+Enregistre ce JSON dans un fichier.
+
+**Étape 3 — enregistrement.** Fusionne ta narration avec les données
+déterministes et écris le résultat dans l'historique local :
+
+```bash
+python -m scripts.cli record --state <state_file> --narrative-file narrative.json
+```
+
+Affiche le livrable final complet (`answer`, `deliverable`, `sources`).
+
+### Alternative : import direct des modules Python
 
 ```python
 from scripts.agent import ValueTrackingAgent
 from scripts.models import AnalyzeRequest, ValueTrackingInputs, ValueKPI, Cout
 
 agent = ValueTrackingAgent()
-response = agent.run(AnalyzeRequest(
+prepared = agent.prepare(AnalyzeRequest(
     question="Bilan de valeur",
     project="mon-projet",
     inputs=ValueTrackingInputs(
@@ -67,6 +88,11 @@ response = agent.run(AnalyzeRequest(
         couts=[Cout(type="CAPEX", libelle="Infra", montant=150_000)],
     ),
 ))
+# prepared["statut"] == "besoin_narratif" -> lire prepared["instructions"] + prepared["context"],
+# rédiger toi-même la narration, puis :
+response = agent.record(prepared["state_file"], {
+    "synthese": "...", "root_causes": [...], "recommandations": [...],
+})
 ```
 
 ## Fichiers du skill
@@ -77,10 +103,10 @@ Voir `README.md` pour le détail de l'architecture, `scripts/` pour le code,
 ## Garde-fous conservés (à ne pas contourner)
 
 - Chiffres = code déterministe uniquement (`compute.py`). Jamais recalculés
-  ou inventés par le LLM.
-- Flux TEXTE (extraits documentaires) → Presidio (anonymisation) → LLM.
-  Flux CHIFFRES (R1, inputs) → jamais anonymisé, jamais transformé par le LLM.
-- L'agent réclame les éléments obligatoires manquants (`statut: "intake"`)
+  ou inventés dans la narration.
+- Flux TEXTE (extraits documentaires) → Presidio (anonymisation) → toi.
+  Flux CHIFFRES (R1, inputs) → jamais anonymisé, jamais reformulé par toi.
+- Le skill réclame les éléments obligatoires manquants (`statut: "intake"`)
   au lieu de produire un livrable non fiable.
 - Isolation stricte par projet : les documents/mémoire d'un projet ne sont
   jamais mélangés avec ceux d'un autre.
