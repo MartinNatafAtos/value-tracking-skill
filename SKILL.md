@@ -40,7 +40,7 @@ d'extraits documentaires anonymisés.
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env   # renseigner au moins une clé LLM (Anthropic OU OpenAI)
+export ANTHROPIC_API_KEY=sk-ant-...   # ou OPENAI_API_KEY (+ LLM_PROVIDER=openai)
 
 python -m scripts.cli \
   --r1 /chemin/vers/dashboard.xlsx \

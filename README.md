@@ -1,35 +1,29 @@
-# Value Tracking Agent
+# Value Tracking Skill
 
-Bilan de valeur / réalisation des bénéfices d'un projet, à partir d'un fichier
-R1 Dashboard (.xlsx) et de documents projet (business case, reporting COPIL,
-données d'usage). Extrait d'un POC RAG interne — packagé ici comme un module
-**autonome**, sans dépendance à Azure ni à un orchestrateur : il tourne en
-local avec la clé LLM de votre choix (Anthropic ou OpenAI).
+Skill qui produit un bilan de valeur / réalisation des bénéfices d'un projet,
+à partir d'un fichier R1 Dashboard (.xlsx) et de documents projet (business
+case, reporting, données d'usage) : tableau KPI (prévu/réalisé/écart),
+leviers 80/20, causes racines sourcées et recommandations priorisées.
 
-## Pourquoi ce découpage
-
-Le module d'origine faisait partie d'un orchestrateur multi-agents avec un
-mode "Azure" (Azure AI Search + Azure OpenAI) et un mode "local" (sans Azure).
-Ce dossier ne reprend **que le mode local** : c'est celui qui a du sens comme
-outil indépendant, réutilisable dans n'importe quel projet ou poussable dans
-son propre dépôt GitHub. Il n'y a donc ici aucune dépendance Azure.
+Aucune dépendance cloud imposée : tourne en local avec la clé LLM de votre
+choix (Anthropic ou OpenAI), aucun compte ni service tiers requis pour le
+reste (parsing, calculs, anonymisation, historique).
 
 ## Installation
 
 ```bash
 pip install -r requirements.txt
 python -m spacy download fr_core_news_md   # requis par Presidio (anonymisation FR)
-cp .env.example .env
 ```
 
-Renseigner dans `.env` **au moins une** clé LLM :
+Définir une clé LLM comme variable d'environnement (pas de fichier de config requis) :
 
-```
-LLM_PROVIDER=anthropic        # anthropic | openai
-ANTHROPIC_API_KEY=sk-ant-...
+```bash
+export LLM_PROVIDER=anthropic        # anthropic | openai
+export ANTHROPIC_API_KEY=sk-ant-...
 # ou
-LLM_PROVIDER=openai
-OPENAI_API_KEY=sk-...
+export LLM_PROVIDER=openai
+export OPENAI_API_KEY=sk-...
 ```
 
 ## Usage
@@ -58,7 +52,7 @@ response = agent.run(AnalyzeRequest(
 ))
 ```
 
-## Architecture
+## Scripts disponibles
 
 ```
 scripts/
@@ -73,17 +67,17 @@ scripts/
   local_docs.py     Collecte filtrée déterministe d'extraits projet (.pdf/.xlsx/.csv/.md/.txt)
   project_memory.py Mémoire projet lisible (.md), relue aux analyses suivantes
   history_store.py  Historique des analyses (fichier JSON local, idempotent par coupe)
-  agent.py          ValueTrackingAgent : orchestre le flow complet
+  agent.py          ValueTrackingAgent : enchaîne les étapes ci-dessus
   r1/               Parseur du format R1 Dashboard (résolution de mapping + extraction)
-  cli.py            Point d'entrée CLI (analyze)
+  cli.py            Point d'entrée en ligne de commande
 tests/              Suite de tests (pytest)
 ```
 
 Pas de serveur ni d'interface : ce skill s'utilise en exécutant du code (CLI
-ou import Python), comme un skill classique — c'est l'agent qui l'invoque qui
-décide de la présentation du résultat, pas ce dépôt.
+ou import Python) — c'est l'agent qui l'invoque qui décide de la présentation
+du résultat, pas ce dépôt.
 
-## Flow de l'agent
+## Déroulé de l'analyse
 
 ```
 1. Résolution du manifeste d'intake (déterministe)
@@ -108,9 +102,6 @@ de format. Les onglets contenant des données RH/temps passé (`Time Bookings`,
 `Work Units`, `Employee name`, `HR`) sont **automatiquement exclus, jamais
 lus** — garde-fou PII sur la source elle-même.
 
-Un fichier d'exemple anonymisé est fourni par le dépôt d'origine
-(`R1_Dashboard_SAMPLE_anonymise.xlsx`) — utile pour un premier test.
-
 ## Confidentialité
 
 - Le texte qualitatif (extraits de documents, mémoire projet) passe par
@@ -121,7 +112,7 @@ Un fichier d'exemple anonymisé est fourni par le dépôt d'origine
 - Avec une clé LLM personnelle (Anthropic ou OpenAI), le texte anonymisé part
   vers l'API publique du provider choisi. Presidio retire le PII nominatif
   mais **pas** la confidentialité commerciale (montants, clauses). Ne pas
-  utiliser de documents réels sensibles sans validation de gouvernance.
+  utiliser de documents réels sensibles sans validation préalable.
 
 ## Tests
 
@@ -129,8 +120,7 @@ Un fichier d'exemple anonymisé est fourni par le dépôt d'origine
 pytest
 ```
 
-## Limites connues / pistes v2
+## Limites connues
 
-- Un seul backend d'historique (JSON local) — pas d'Azure AI Search ici par
-  design (voir "Pourquoi ce découpage").
-- `statut_reco` (suivi "fait" vs "à suivre") est manuel entre deux analyses.
+- Un seul backend d'historique (fichier JSON local).
+- `statut_reco` (suivi "fait" vs "à suivre") est mis à jour manuellement entre deux analyses.

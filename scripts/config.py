@@ -1,14 +1,10 @@
 """Configuration du skill Value Tracking via variables d'environnement.
 
-Aucune dépendance Azure : ce module ne connaît que les providers LLM
-utilisables partout (Anthropic, OpenAI) et, en option, un déploiement
-Azure OpenAI existant (pour ceux qui en ont déjà un).
+Lit directement les variables d'environnement du processus (export/set,
+secrets d'un environnement d'agent, etc.) — aucun fichier de config requis.
 """
 
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
 
 
 class Config:
