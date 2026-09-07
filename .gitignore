@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+.r1_mapping_cache.json
+local-history.json
+local-docs/
+local-memory/
