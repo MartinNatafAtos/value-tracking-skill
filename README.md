@@ -5,14 +5,6 @@ Skill qui produit un bilan de valeur / réalisation des bénéfices d'un projet,
 case, reporting, données d'usage) : tableau KPI (prévu/réalisé/écart),
 leviers 80/20, causes racines sourcées et recommandations priorisées.
 
-**Aucune clé LLM requise.** Ce skill est destiné à être exécuté PAR un agent
-LLM (Claude, ChatGPT, ou tout autre agent capable de lancer une commande ou
-d'importer un module Python) qui a déjà sa propre capacité de raisonnement.
-Les scripts ne font que le travail déterministe — calculs, extraction,
-anonymisation ; c'est l'agent qui les exécute qui rédige lui-même la
-synthèse, les causes racines et les recommandations, avec son propre
-raisonnement. Aucun appel réseau vers un provider LLM n'est fait par ce dépôt.
-
 ## Installation
 
 ```bash
